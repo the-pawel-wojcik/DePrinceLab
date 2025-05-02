@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 import psi4
 from psi4.core import Molecule
@@ -48,58 +49,52 @@ def get_integrals(mol: Molecule, options: dict) -> Integrals:
 
 
 @dataclass
-class Guess:
-    density: NDArray
+class Solution:
     fock: NDArray
+    density: NDArray
+    orbitals: NDArray
     occ_slice: slice
+
+
+    def copy(self) -> Solution:
+        return Solution(
+            fock=self.fock.copy(),
+            density=self.density.copy(),
+            orbitals=self.orbitals.copy(),
+            occ_slice=self.occ_slice,
+        )
 
 
 def build_guess(
     integrals: Integrals,
-    overlap_inv_root: NDArray
-) -> tuple[Guess, Guess]:
+    lowdin: NDArray
+) -> tuple[Solution, Solution]:
     """ Build the "core" guess. 
 
     Return a tuple of guess: one for spin up and one for spin down. """
-    # core guess
+
+    # core guess is formed by diagonalizing the electronic Hamiltonian that is
+    # missing the electron-electron interactions
     core_Fock_up = integrals.core_Hamiltonian
 
-    core_Fock_up = overlap_inv_root.T @ core_Fock_up @ overlap_inv_root
-    core_Fock_eigensys = np.linalg.eigh(core_Fock_up)
-    guess_up = overlap_inv_root @ core_Fock_eigensys.eigenvectors
-
-    guess_down = guess_up.copy()
-    core_Fock_down = core_Fock_up.copy()
-    # Density matrices
     occupied_up = slice(0, integrals.n_up)
-    occupied_down = slice(0, integrals.n_down)
-    density_up = np.einsum(
-        'pi,qi->pq',
-        guess_up[:, occupied_up],
-        guess_up[:, occupied_up]
-    )
-    density_down = np.einsum(
-        'pi,qi->pq',
-        guess_down[:, occupied_down],
-        guess_down[:, occupied_down]
-    )
+    orbitals_up = diagonalize_fock(core_Fock_up, lowdin)
+    density_up = build_density(orbitals_up, occupied_up)
 
-    up = Guess(
+    up = Solution(
         density=density_up,
+        orbitals=orbitals_up,
         fock=core_Fock_up,
         occ_slice=occupied_up
     )
-    down = Guess(
-        density=density_down,
-        fock=core_Fock_down,
-        occ_slice=occupied_down,
-    )
+    down = up.copy()
+
     return up, down
 
 
 def scf_energy(
-    up: Guess,
-    down: Guess,
+    up: Solution,
+    down: Solution,
     core_Hamiltonian: NDArray
 ) -> float:
     energy = 0.5 * np.dot(
@@ -121,7 +116,7 @@ def print_SCF_header():
     print(header)
 
 
-def build_focks(up: Guess, down: Guess, integrals: Integrals):
+def build_focks(up: Solution, down: Solution, integrals: Integrals):
     coulomb_up = np.einsum(
         'rs, pqrs -> pq', up.density, integrals.electron_repulsion,
     )
@@ -143,24 +138,32 @@ def build_focks(up: Guess, down: Guess, integrals: Integrals):
     return fock_up, fock_down
 
 
+def build_density(orbitals: NDArray, occupied: slice) -> NDArray:
+    density = np.einsum(
+        'pi,qi->pq', orbitals[:, occupied], orbitals[:, occupied]
+    )
+    return density
+
+
 def diagonalize_fock(
     fock: NDArray,
-    transform: NDArray
+    lowdin: NDArray
 ) -> NDArray:
     """
-    transform: square root of the inverse of the overlap matrix, S.
+    lowdin: square root of the inverse of the diagonalized overlap matrix, S.
+    It's needed in the symmetric Löwdin's diagonalization.
     """
     # transform Fock matrices to the orthogonal basis
-    transed_Fock = transform.transpose() @ fock @ transform
+    transed_Fock = lowdin.transpose() @ fock @ lowdin
     fock_eigensystem = np.linalg.eigh(transed_Fock)
     # back transform the MO coefficient matrices to the non-orthogonal basis
-    mo_coefficients = transform @ fock_eigensystem.eigenvectors
-    return mo_coefficients
+    orbitals = lowdin @ fock_eigensystem.eigenvectors
+    return orbitals
 
 
 def iterative_solution(
-    up: Guess,
-    down: Guess,
+    up: Solution,
+    down: Solution,
     integrals: Integrals,
     overlap_inv_root: NDArray,
     mol: Molecule,
@@ -172,30 +175,30 @@ def iterative_solution(
     print_SCF_header()
 
     old_energy = scf_energy(up, down, integrals.core_Hamiltonian)
-    old_up = Guess(up.density.copy(), up.fock.copy(), up.occ_slice)
-    old_down = Guess(down.density.copy(), down.fock.copy(), down.occ_slice)
+    old_up = up.copy()
+    old_down = down.copy()
 
     for iter in range (0, maxiter):
         # build Fock matrix using current density
         fock_up, fock_down = build_focks(up, down, integrals)
-        mo_coeffcients_up = diagonalize_fock(fock_up, overlap_inv_root)
-        mo_coeffcients_down = diagonalize_fock(fock_down, overlap_inv_root)
 
-        density_up = np.einsum(
-            'pi,qi->pq',
-            mo_coeffcients_up[:, up.occ_slice],
-            mo_coeffcients_up[:, up.occ_slice]
+        mo_coeffcients_up = diagonalize_fock(fock_up, overlap_inv_root)
+        density_up = build_density(mo_coeffcients_up, up.occ_slice)
+        up = Solution(
+            fock=fock_up,
+            orbitals=mo_coeffcients_up,
+            density=density_up,
+            occ_slice=up.occ_slice,
         )
-        density_down = np.einsum(
-            'pi,qi->pq',
-            mo_coeffcients_down[:, down.occ_slice],
-            mo_coeffcients_down[:, down.occ_slice]
+        mo_coeffcients_down = diagonalize_fock(fock_down, overlap_inv_root)
+        density_down = build_density(mo_coeffcients_down, down.occ_slice)
+        down = Solution(
+            fock=fock_down,
+            orbitals=mo_coeffcients_down,
+            density=density_down,
+            occ_slice=down.occ_slice,
         )
-        
-        up = Guess(density=density_up, fock=fock_up, occ_slice=up.occ_slice)
-        down = Guess(
-                density=density_down, fock=fock_down, occ_slice=down.occ_slice
-        )
+
         # current energy
         energy = scf_energy(up, down, integrals.core_Hamiltonian)
         
@@ -217,8 +220,8 @@ def iterative_solution(
 
         # save energy and density
         old_energy = energy
-        old_up = Guess(up.density.copy(), up.fock.copy(), up.occ_slice)
-        old_down = Guess(down.density.copy(), down.fock.copy(), down.occ_slice)
+        old_up = up.copy()
+        old_down = down.copy()
 
         # convergence check
         if dE < e_convergence and dD < d_convergence:
@@ -233,6 +236,19 @@ def iterative_solution(
     print(f'SCF total energy: {energy + mol.nuclear_repulsion_energy():.12f}')
 
 
+def build_Lowdin_transformation(integrals: Integrals) -> NDArray:
+    """ In Lowdin's symmetric orthogonalization one needs to transfrom back and
+    forward with the inverse of the square root of the overlap matrix
+    eigenvalues. This function builds the transformation matrix. """
+
+    overlap_esystem = np.linalg.eigh(integrals.overlap)
+    overlap_inv_root = np.diagflat(overlap_esystem.eigenvalues ** (-0.5))
+    transformation = overlap_esystem.eigenvectors
+    lowdin = transformation @ overlap_inv_root @ transformation.T
+
+    return lowdin
+
+
 def main():
     mol = psi4.geometry("""
         0 1
@@ -243,14 +259,9 @@ def main():
     """)
     options = {'basis': 'cc-pvdz'}
     integrals = get_integrals(mol, options)
-
-    overlap_esystem = np.linalg.eigh(integrals.overlap)
-    overlap_inv_root = np.diagflat(overlap_esystem.eigenvalues ** (-0.5))
-    transformation = overlap_esystem.eigenvectors
-    overlap_inv_root = transformation @ overlap_inv_root @ transformation.T
-
-    up, down = build_guess(integrals, overlap_inv_root)
-    iterative_solution(up, down, integrals, overlap_inv_root, mol)
+    lowdin = build_Lowdin_transformation(integrals)
+    up, down = build_guess(integrals, lowdin)
+    iterative_solution(up, down, integrals, lowdin, mol)
 
 
 if __name__ == "__main__":
