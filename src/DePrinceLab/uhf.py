@@ -1,10 +1,12 @@
 from __future__ import annotations
+from dataclasses import dataclass
+
 import numpy as np
+from numpy.typing import NDArray
 import psi4
 from psi4.core import Molecule
-from dataclasses import dataclass
-from numpy.typing import NDArray
 
+from diis import Solver_DIIS
 
 @dataclass
 class Integrals:
@@ -17,7 +19,6 @@ class Integrals:
     core_Hamiltonian: NDArray
     electron_repulsion: NDArray
     overlap: NDArray
-
 
 
 def get_integrals(mol: Molecule, options: dict) -> Integrals:
@@ -65,16 +66,16 @@ class Solution:
         )
 
 
-def build_guess(
+def build_core_guess(
     integrals: Integrals,
     lowdin: NDArray
 ) -> tuple[Solution, Solution]:
-    """ Build the "core" guess. 
+    """ 
+    The "core" guess is formed by diagonalizing the electronic Hamiltonian that
+    is missing the electron-electron interactions.
 
-    Return a tuple of guess: one for spin up and one for spin down. """
+    Return tuple: [spin up, spin down] """
 
-    # core guess is formed by diagonalizing the electronic Hamiltonian that is
-    # missing the electron-electron interactions
     core_Fock_up = integrals.core_Hamiltonian
 
     occupied_up = slice(0, integrals.n_up)
@@ -95,7 +96,7 @@ def build_guess(
 def scf_energy(
     up: Solution,
     down: Solution,
-    core_Hamiltonian: NDArray
+    core_Hamiltonian: NDArray,
 ) -> float:
     energy = 0.5 * np.dot(
         up.density.flatten(),
@@ -108,9 +109,12 @@ def scf_energy(
     return energy
 
 
-def print_SCF_header():
+def print_SCF_header(use_diis: bool = False):
     print('==> Begin SCF Iterations <==')
-    fields = ('Iter', 'energy', 'dE', 'dD')
+    if use_diis is False:
+        fields = ('Iter', 'energy', 'dE', 'dD')
+    else:
+        fields = ('Iter', 'energy', 'dE', 'g_norm')
     field_width = 80 // len(fields)
     header = ''.join(field.center(field_width) for field in fields)
     print(header)
@@ -154,69 +158,163 @@ def diagonalize_fock(
     It's needed in the symmetric Löwdin's diagonalization.
     """
     # transform Fock matrices to the orthogonal basis
-    transed_Fock = lowdin.transpose() @ fock @ lowdin
-    fock_eigensystem = np.linalg.eigh(transed_Fock)
+    fock_in_lowdin = lowdin.T @ fock @ lowdin
+    fock_eigensystem = np.linalg.eigh(fock_in_lowdin)
     # back transform the MO coefficient matrices to the non-orthogonal basis
     orbitals = lowdin @ fock_eigensystem.eigenvectors
     return orbitals
+
+
+def default_solver(
+    fock: NDArray,
+    lowdin: NDArray,
+    occ_slice: slice,
+) -> Solution:
+    orbitals = diagonalize_fock(fock, lowdin)
+    density = build_density(orbitals, occ_slice)
+    solution = Solution(
+        fock=fock,
+        orbitals=orbitals,
+        density=density,
+        occ_slice=occ_slice
+    )
+    return solution
+
+
+""" part of DIIS """
+def get_orbital_gradient(fock_lowdin, density, lowdin, overlap):
+    commutator = fock_lowdin @ density @ overlap
+    commutator -= overlap @ density @ fock_lowdin
+    orbital_gradient = lowdin.T @ commutator @ lowdin
+    return orbital_gradient
+
+""" part of DIIS """
+def find_diis_error_vec(up, down, lowdin, integrals) -> NDArray:
+    error_up = get_orbital_gradient(
+        up.fock, up.density,
+        lowdin, integrals.overlap,
+    )
+    error_down = get_orbital_gradient(
+        down.fock, down.density,
+        lowdin, integrals.overlap,
+    )
+    error_vector = np.hstack(
+        (error_up.flatten(), error_down.flatten())
+    )
+    return error_vector
+
+
+""" part of DIIS """
+def diis_solver(
+    up: Solution,
+    down: Solution,
+    integrals: Integrals,
+    lowdin: NDArray,
+    diis: Solver_DIIS,
+) -> tuple[Solution, Solution, float]:
+
+    error_vector = find_diis_error_vec(up, down, lowdin, integrals)
+    # DIIS extrapolation
+    fock_lowdin_up = lowdin.T @ up.fock @ lowdin
+    fock_lowdin_down = lowdin.T @ down.fock @ lowdin
+    soln_vector = np.hstack(
+        (fock_lowdin_up.flatten(), fock_lowdin_down.flatten())
+    )
+    soln_vector = diis.extrapolate(soln_vector, error_vector)
+
+    # reshape flattened extrapolated solution vector
+    F_a = up.fock
+    F_b = down.fock
+    F_up = soln_vector[:int(len(F_a)**2)].reshape(len(F_a), len(F_a))
+    F_down = soln_vector[int(len(F_a)**2):].reshape(len(F_b), len(F_b))
+
+    up_eigensystem = np.linalg.eigh(F_up)
+    down_eigensystem = np.linalg.eigh(F_down)
+
+    orbitals_up = lowdin @ up_eigensystem.eigenvectors
+    density_up = build_density(orbitals_up, up.occ_slice)
+
+    orbitals_down = lowdin @ down_eigensystem.eigenvectors
+    density_down = build_density(orbitals_down, down.occ_slice)
+
+    solution_up = Solution(
+        fock=up.fock,
+        density=density_up,
+        orbitals=orbitals_up,
+        occ_slice=up.occ_slice,
+    )
+    solution_down = Solution(
+        fock=down.fock,
+        density=density_down,
+        orbitals=orbitals_down,
+        occ_slice=down.occ_slice,
+    )
+
+    # orbital gradient norm (for convergence)
+    g_norm = float(np.linalg.norm(error_vector))
+    return solution_up, solution_down, g_norm
+
+
+def print_iter_result(
+    iter: int, energy: float, mol: Molecule, dE: float, last: float,
+):
+    """
+    last is dD for regular SCF and g_norm for DIIS
+    """
+    # energy is reported with the nuclear repulsion contribution
+    fmt='.12f'
+    fields = (
+        f'{iter}',
+        f'{energy + mol.nuclear_repulsion_energy():{fmt}}',
+        f'{dE:{fmt}}',
+        f'{last:{fmt}}',
+    )
+    field_width = 80 // 4
+    report_line = ''.join(field.center(field_width) for field in fields)
+    print(report_line)
 
 
 def iterative_solution(
     up: Solution,
     down: Solution,
     integrals: Integrals,
-    overlap_inv_root: NDArray,
+    lowdin: NDArray,
     mol: Molecule,
+    use_diis: bool = False
 ):
     e_convergence = 1e-8
     d_convergence = 1e-6
     maxiter = 100
 
-    print_SCF_header()
+    print_SCF_header(use_diis)
 
     old_energy = scf_energy(up, down, integrals.core_Hamiltonian)
     old_up = up.copy()
     old_down = down.copy()
 
-    for iter in range (0, maxiter):
-        # build Fock matrix using current density
-        fock_up, fock_down = build_focks(up, down, integrals)
+    if use_diis is True:
+        diis = Solver_DIIS(max_stored_vecs=8)
 
-        mo_coeffcients_up = diagonalize_fock(fock_up, overlap_inv_root)
-        density_up = build_density(mo_coeffcients_up, up.occ_slice)
-        up = Solution(
-            fock=fock_up,
-            orbitals=mo_coeffcients_up,
-            density=density_up,
-            occ_slice=up.occ_slice,
-        )
-        mo_coeffcients_down = diagonalize_fock(fock_down, overlap_inv_root)
-        density_down = build_density(mo_coeffcients_down, down.occ_slice)
-        down = Solution(
-            fock=fock_down,
-            orbitals=mo_coeffcients_down,
-            density=density_down,
-            occ_slice=down.occ_slice,
-        )
+    for iter in range(maxiter):
+        # build Fock matrices using current density
+        up.fock, down.fock = build_focks(up, down, integrals)
+
+        if use_diis is False:
+            up = default_solver(up.fock, lowdin, up.occ_slice)
+            down = default_solver(down.fock, lowdin, down.occ_slice)
+        else:
+            up, down, g_norm = diis_solver(up, down, integrals, lowdin, diis)
 
         # current energy
         energy = scf_energy(up, down, integrals.core_Hamiltonian)
-        
         dE = np.abs(energy - old_energy)
-        dD = np.linalg.norm(up.density - old_up.density) 
-        dD += np.linalg.norm(down.density - old_down.density)
 
-        # energy is reported with the nuclear repulsion contribution
-        fmt='.12f'
-        fields = (
-            f'{iter}',
-            f'{energy + mol.nuclear_repulsion_energy():{fmt}}',
-            f'{dE:{fmt}}',
-            f'{dD:{fmt}}',
-        )
-        field_width = 80 // 4
-        report_line = ''.join(field.center(field_width) for field in fields)
-        print(report_line)
+        if use_diis is False:
+            dD = np.linalg.norm(up.density - old_up.density) 
+            dD += np.linalg.norm(down.density - old_down.density)
+            print_iter_result(iter, energy, mol, dE, float(dD))
+        else:
+            print_iter_result(iter, energy, mol, dE, g_norm)
 
         # save energy and density
         old_energy = energy
@@ -224,7 +322,13 @@ def iterative_solution(
         old_down = down.copy()
 
         # convergence check
-        if dE < e_convergence and dD < d_convergence:
+        converged = False
+        if use_diis is False:
+            converged = dE < e_convergence and dD < d_convergence
+        else:
+            converged = dE < e_convergence and g_norm < d_convergence
+
+        if converged:
             break
 
         iter += 1
@@ -260,8 +364,8 @@ def main():
     options = {'basis': 'cc-pvdz'}
     integrals = get_integrals(mol, options)
     lowdin = build_Lowdin_transformation(integrals)
-    up, down = build_guess(integrals, lowdin)
-    iterative_solution(up, down, integrals, lowdin, mol)
+    up, down = build_core_guess(integrals, lowdin)
+    iterative_solution(up, down, integrals, lowdin, mol, use_diis=True)
 
 
 if __name__ == "__main__":
