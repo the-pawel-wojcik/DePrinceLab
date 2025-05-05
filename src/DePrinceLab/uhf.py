@@ -21,6 +21,25 @@ class Integrals:
     overlap: NDArray
 
 
+    def __post_init__(self):
+        """ TODO: """
+        self.lowdin = self.build_Lowdin_transformation()
+
+
+    def build_Lowdin_transformation(self) -> NDArray:
+        """ In Lowdin's symmetric orthogonalization one needs to transfrom back
+        and forth with the inverse of the square root of the overlap matrix
+        eigenvalues. This function builds the transformation matrix. """
+
+        overlap_esystem = np.linalg.eigh(self.overlap)
+        overlap_inv_root = np.diagflat(overlap_esystem.eigenvalues ** (-0.5))
+        transformation = overlap_esystem.eigenvectors
+        lowdin = transformation @ overlap_inv_root @ transformation.T
+
+        return lowdin
+
+
+
 def get_integrals(mol: Molecule, options: dict) -> Integrals:
     """
     :param mol: a psi4 molecule object
@@ -281,7 +300,7 @@ def iterative_solution(
     lowdin: NDArray,
     mol: Molecule,
     use_diis: bool = False
-):
+) -> tuple[Solution, Solution]:
     e_convergence = 1e-8
     d_convergence = 1e-6
     maxiter = 100
@@ -334,23 +353,23 @@ def iterative_solution(
         iter += 1
     else:
         print('SCF did not converge...')
-        return
+        return up, down
 
     print('SCF converged!')
     print(f'SCF total energy: {energy + mol.nuclear_repulsion_energy():.12f}')
+    return up, down
 
 
-def build_Lowdin_transformation(integrals: Integrals) -> NDArray:
-    """ In Lowdin's symmetric orthogonalization one needs to transfrom back and
-    forward with the inverse of the square root of the overlap matrix
-    eigenvalues. This function builds the transformation matrix. """
-
-    overlap_esystem = np.linalg.eigh(integrals.overlap)
-    overlap_inv_root = np.diagflat(overlap_esystem.eigenvalues ** (-0.5))
-    transformation = overlap_esystem.eigenvectors
-    lowdin = transformation @ overlap_inv_root @ transformation.T
-
-    return lowdin
+class SCF:
+    def __init__(
+        self,
+        integrals: Integrals,
+        mol: Molecule,
+        use_diis: bool = False,
+    ):
+        self.integrals = integrals
+        self.mol = mol
+        self.use_diis = use_diis
 
 
 def main():
@@ -363,9 +382,12 @@ def main():
     """)
     options = {'basis': 'cc-pvdz'}
     integrals = get_integrals(mol, options)
-    lowdin = build_Lowdin_transformation(integrals)
+    scf = SCF(integrals, mol)
+    lowdin = integrals.lowdin
     up, down = build_core_guess(integrals, lowdin)
-    iterative_solution(up, down, integrals, lowdin, mol, use_diis=True)
+    up, down = iterative_solution(
+        up, down, integrals, lowdin, mol, use_diis=True
+    )
 
 
 if __name__ == "__main__":
