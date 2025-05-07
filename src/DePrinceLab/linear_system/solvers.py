@@ -27,17 +27,30 @@ def recommended(ls: LinearSystem) -> NDArray:
 
 
 def jacobi(ls: LinearSystem) -> NDArray:
+    MAXITER = 100
+    THRESHOLD = 1e-6
     matrix = ls.matrix
     rhs = ls.rhs
 
     diagonal_elements = matrix.diagonal()
     diagonal = np.diag(diagonal_elements)
     remider = matrix - diagonal
+
     inv_diagonal = np.diag(1.0/diagonal_elements)
     jacobi = inv_diagonal @ (-remider)
+
     solution = rhs.copy()
-    for _ in range(10):
+    for _ in range(MAXITER):
+        old_solution = solution.copy()
         solution = jacobi @ solution + inv_diagonal @ rhs
+
+        curr_norm = np.linalg.norm(solution, ord=np.inf)
+        diff_norm = np.linalg.norm(solution - old_solution, ord=np.inf)
+        if diff_norm / curr_norm < THRESHOLD:
+            break
+    else:
+        raise RuntimeError("Jacobi method didn't converge")
+
 
     if ls.solution is None:
         ls.solution = solution
