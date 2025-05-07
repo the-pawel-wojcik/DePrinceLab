@@ -1,0 +1,48 @@
+from DePrinceLab.linear_system.utils import LinearSystem
+import numpy as np
+from numpy.typing import NDArray
+from scipy import linalg
+
+
+def brute_force(ls: LinearSystem) -> NDArray:
+    solution = linalg.inv(ls.matrix).dot(ls.rhs)
+
+    if ls.solution is None:
+        ls.solution = solution
+    else:
+        assert np.allclose(ls.solution, solution), "brute force must match"
+
+    return solution
+
+
+def recommended(ls: LinearSystem) -> NDArray:
+    solution = linalg.solve(ls.matrix, ls.rhs)
+
+    if ls.solution is None:
+        ls.solution = solution
+    else:
+        assert np.allclose(ls.solution, solution), "solve must match"
+
+    return solution
+
+
+def jacobi(ls: LinearSystem) -> NDArray:
+    matrix = ls.matrix
+    rhs = ls.rhs
+
+    diagonal_elements = matrix.diagonal()
+    diagonal = np.diag(diagonal_elements)
+    remider = matrix - diagonal
+    inv_diagonal = np.diag(1.0/diagonal_elements)
+    jacobi = inv_diagonal @ (-remider)
+    solution = rhs.copy()
+    for _ in range(10):
+        solution = jacobi @ solution + inv_diagonal @ rhs
+
+    if ls.solution is None:
+        ls.solution = solution
+    else:
+        assert np.allclose(ls.solution, solution), "Jacobi must match"
+
+    print(f'Jacobi {solution=}')
+    return solution
