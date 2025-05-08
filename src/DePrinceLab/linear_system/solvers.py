@@ -70,7 +70,7 @@ def gmres_unclever(ls: LinearSystem) -> NDArray:
     solution, exit_code = gmres(
         matrix,
         rhs,
-        maxiter=100,
+        rtol=1e-12,
     )
     if exit_code != 0:
         raise RuntimeError("GMRES didn't converge")
@@ -105,7 +105,7 @@ def gmres_the_way(ls: LinearSystem) -> NDArray:
     solution, exit_code = gmres(
         RawMatTimesVec(matrix),
         rhs,
-        maxiter=100,
+        rtol=1e-12,
     )
     if exit_code != 0:
         raise RuntimeError("GMRES didn't converge")
