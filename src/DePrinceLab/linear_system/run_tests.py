@@ -6,6 +6,7 @@ from DePrinceLab.linear_system.test_random import test_random
 def main():
     test_atomic_energy()
     test_diagonal_dominant()
+    test_random()
 
 
 if __name__ == "__main__":
