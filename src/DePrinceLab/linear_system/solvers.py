@@ -59,7 +59,6 @@ def jacobi(ls: LinearSystem) -> NDArray:
     else:
         assert np.allclose(ls.solution, solution), "Jacobi must match"
 
-    print(f'Jacobi {solution=}')
     return solution
 
 
