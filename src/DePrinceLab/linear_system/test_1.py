@@ -1,7 +1,7 @@
 import numpy as np
 from DePrinceLab.linear_system.utils import LinearSystem
 from DePrinceLab.linear_system.solvers import (
-    brute_force, recommended, jacobi
+    brute_force, recommended, jacobi, gmres_unclever, gmres_the_way
 )
 from numpy.typing import NDArray
 
@@ -10,6 +10,7 @@ def add_random_noise(
     matrix: NDArray,
     scale: float,
     distribution: str ='uniform',
+    seed: int | None = None,
 ):
     """
     Adds random noise to a matrix.
@@ -19,14 +20,20 @@ def add_random_noise(
     - scale: The scale of the random noise.
     - distribution: The distribution of the random noise. Can be 'uniform' or
       'normal'
+    - seed (int): Optional random seed for reproducibility.
 
     Returns:
     - The matrix with added random noise.
     """
+    if seed is not None:
+        rng = np.random.default_rng(seed=seed)
+    else:
+        rng =  np.random.default_rng()
+
     if distribution == 'uniform':
-        random_values = np.random.uniform(-scale, scale, matrix.shape)
+        random_values = rng.uniform(low=-scale, high=scale, size=matrix.shape)
     elif distribution == 'normal':
-        random_values = np.random.normal(0, scale, matrix.shape)
+        random_values = rng.normal(loc=0, scale=scale, size=matrix.shape)
     else:
         raise ValueError("Distribution must be 'uniform' or 'normal'.")
 
@@ -46,11 +53,9 @@ def test_diagonal_dominant():
     _ = brute_force(problem)
     _ = recommended(problem)
     _ = jacobi(problem)
-
-
-def main():
-    test_diagonal_dominant()
+    _ = gmres_unclever(problem)
+    _ = gmres_the_way(problem)
 
 
 if __name__ == "__main__":
-    main()
+    test_diagonal_dominant()
