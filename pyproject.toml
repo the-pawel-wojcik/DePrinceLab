@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "DePrinceLab"
+version = "0.1.0"
+description = "Teaching of Dr. DePrince."
+readme = "readme.md"
+authors = [
+  {name = "Paweł Wójcik", email = "pawel.wojcik5@gmail.com"},
+]
+dependencies = [
+  "numpy",
+  "scipy",
+  # "psi4",
+]
+
+[project.urls]
+homepage = "https://deprincelab.github.io/tutorials"
+documentation = "https://deprincelab.github.io/tutorials"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/DePrinceLab"]
