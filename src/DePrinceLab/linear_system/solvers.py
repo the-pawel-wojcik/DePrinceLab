@@ -1,7 +1,9 @@
+from typing import Any
 from DePrinceLab.linear_system.utils import LinearSystem
 import numpy as np
 from numpy.typing import NDArray
 from scipy import linalg
+from scipy.sparse.linalg import LinearOperator, gmres
 
 
 def brute_force(ls: LinearSystem) -> NDArray:
@@ -58,4 +60,59 @@ def jacobi(ls: LinearSystem) -> NDArray:
         assert np.allclose(ls.solution, solution), "Jacobi must match"
 
     print(f'Jacobi {solution=}')
+    return solution
+
+
+def gmres_unclever(ls: LinearSystem) -> NDArray:
+    matrix = ls.matrix
+    rhs = ls.rhs
+    # generalized minimal residual
+    solution, exit_code = gmres(
+        matrix,
+        rhs,
+        maxiter=100,
+    )
+    if exit_code != 0:
+        raise RuntimeError("GMRES didn't converge")
+
+    if ls.solution is None:
+        ls.solution = solution
+    else:
+        assert np.allclose(ls.solution, solution), "gmres unclever must match"
+
+    return solution
+
+
+class RawMatTimesVec(LinearOperator):
+    """ `gmres_the_way` helper. """
+
+    def __init__(self: Any, matrix: NDArray) -> None:
+        """ The point is to NOT store the whole matrix.
+        But here for testing, I will still keep it. """
+        self.matrix = matrix
+        self.shape = matrix.shape
+        self.dtype = matrix.dtype
+
+    def _matvec(self, x: NDArray) :
+        """ This is where the implementation of mat@vec should go. """
+        return self.matrix @ x.reshape(-1, 1)
+
+
+def gmres_the_way(ls: LinearSystem) -> NDArray:
+    matrix = ls.matrix
+    rhs = ls.rhs
+
+    solution, exit_code = gmres(
+        RawMatTimesVec(matrix),
+        rhs,
+        maxiter=100,
+    )
+    if exit_code != 0:
+        raise RuntimeError("GMRES didn't converge")
+
+    if ls.solution is None:
+        ls.solution = solution
+    else:
+        assert np.allclose(ls.solution, solution), "`gmres_the_way` must match"
+
     return solution

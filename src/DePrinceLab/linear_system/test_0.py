@@ -1,6 +1,8 @@
 import numpy as np
 from DePrinceLab.linear_system.utils import LinearSystem
-from DePrinceLab.linear_system.solvers import brute_force, recommended
+from DePrinceLab.linear_system.solvers import (
+    brute_force, recommended, gmres_unclever, gmres_the_way
+)
 
 
 def build_atomic_energy() -> LinearSystem:
@@ -22,4 +24,9 @@ def test_atomic_energy():
 
     _ = brute_force(problem)
     _ = recommended(problem)
+    _ = gmres_unclever(problem)
+    _ = gmres_the_way(problem)
 
+
+if __name__ == "__main__":
+    test_atomic_energy()
