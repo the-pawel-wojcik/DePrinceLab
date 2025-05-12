@@ -4,20 +4,20 @@ from pdaggerq.parser import contracted_strings_to_tensor_terms
 
 def build_expression():
     pq = rome.pq_helper('fermi')
-    ai   = ['e1(a,i)']
+    ai = ['e1(a,i)']
     aihc = ['e1(i,a)']
-    bj   = ['e1(b,j)']
+    bj = ['e1(b,j)']
     bjhc = ['e1(j,b)']
 
-    pq.add_double_commutator( 1.0, ['f'], ai  , bj  )
-    pq.add_double_commutator(-1.0, ['f'], ai  , bjhc)
-    pq.add_double_commutator(-1.0, ['f'], aihc, bj  )
-    pq.add_double_commutator( 1.0, ['f'], aihc, bjhc)
+    pq.add_double_commutator(1.0, ['f'], ai, bj)
+    pq.add_double_commutator(-1.0, ['f'], ai, bjhc)
+    pq.add_double_commutator(-1.0, ['f'], aihc, bj)
+    pq.add_double_commutator(1.0, ['f'], aihc, bjhc)
 
-    pq.add_double_commutator( 1.0, ['v'], ai  , bj  )
-    pq.add_double_commutator(-1.0, ['v'], ai  , bjhc)
-    pq.add_double_commutator(-1.0, ['v'], aihc, bj  )
-    pq.add_double_commutator( 1.0, ['v'], aihc, bjhc)
+    pq.add_double_commutator(1.0, ['v'], ai, bj)
+    pq.add_double_commutator(-1.0, ['v'], ai, bjhc)
+    pq.add_double_commutator(-1.0, ['v'], aihc, bj)
+    pq.add_double_commutator(1.0, ['v'], aihc, bjhc)
 
     pq.simplify()
     return pq
@@ -42,7 +42,7 @@ def print_unrestricted(pq):
             }
             terms = pq.strings(spin_labels=spin_labels)
             terms = contracted_strings_to_tensor_terms(terms)
-            
+
             print(f'# The {s1}-{s2} spin-block:')
             for term in terms:
                 print(f'# {term}')
