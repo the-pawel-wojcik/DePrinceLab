@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, TypeVar
 import psi4
 import numpy as np
 from numpy import einsum
@@ -193,7 +193,10 @@ def find_polarizabilities_directly(
     return polarizabilities
 
 
-def gmres_solve(matrix: NDArray, rhs: NDArray) -> NDArray:
+MatrixLike = TypeVar('MatrixLike', bound=LinearOperator, contravariant=True)
+
+
+def gmres_solve(matrix: NDArray | MatrixLike, rhs: NDArray) -> NDArray:
     """
     solves `matrix @ solution = rhs`
     """
@@ -201,6 +204,21 @@ def gmres_solve(matrix: NDArray, rhs: NDArray) -> NDArray:
     if exit_code != 0:
         raise RuntimeError("GMRES didn't converge")
     return solution
+
+
+class OrbitalHessianAction(LinearOperator):
+    """ GMRES helper. Calculates the result of `orbital_hessian @ vector` """
+
+    def __init__(self: Any, matrix: NDArray) -> None:
+        """ The point is to NOT store the whole matrix.
+        But here for testing, I will still keep it. """
+        self.matrix = matrix
+        self.shape = matrix.shape
+        self.dtype = matrix.dtype
+
+    def _matvec(self, x: NDArray):
+        """ This is where the implementation of mat@vec should go. """
+        return self.matrix @ x.reshape(-1, 1)
 
 
 def find_polarizabilities_iteratively(
@@ -220,6 +238,8 @@ def find_polarizabilities_iteratively(
         h_aa, h_ab, h_ba, h_bb, nmo, noa, nob
     )
 
+    orbital_hessian_action = OrbitalHessianAction(orbital_hessian)
+
     # combine spin dipole integrals into a single vector the length of hinv
     dipole_moment = {
         "x": np.hstack((mua_x[oa, va].flatten(), mub_x[ob, vb].flatten())),
@@ -228,7 +248,7 @@ def find_polarizabilities_iteratively(
     }
 
     response = {
-        xyz: 2 * gmres_solve(orbital_hessian, dipole_moment[xyz])
+        xyz: 2 * gmres_solve(orbital_hessian_action, dipole_moment[xyz])
         for xyz in ["x", "y", "z"]
     }
 
