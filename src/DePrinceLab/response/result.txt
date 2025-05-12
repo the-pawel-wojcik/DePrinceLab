@@ -1,0 +1,23 @@
+Polarizabilities:
+1) from inverted HF orbitals Hessian:
+
+==> Static Dipole Polarizability <==
+
+            xx =    3.0444          
+            xy =    0.0000          
+            xz =    0.0000          
+            yy =    6.6932          
+            yz =   -0.0000          
+            zz =    4.9785          
+
+2) from GMRES iterative solution:
+
+==> Static Dipole Polarizability <==
+
+            xx =    3.0444          
+            xy =    0.0000          
+            xz =    0.0000          
+            yy =    6.6932          
+            yz =   -0.0000          
+            zz =    4.9785          
+
