@@ -215,6 +215,19 @@ def gmres_solve(matrix: NDArray | MatrixLike, rhs: NDArray) -> NDArray:
     return solution
 
 
+class OrbitalHessianAction(LinearOperator):
+    """ GMRES helper. Calculates the result of `orbital_hessian @ vector` """
+
+    def __init__(self: Any, shape: tuple[int, ...], dtype: np.dtype) -> None:
+        """ Scipy says that these are always needed. """
+        self.shape = shape
+        self.dtype = dtype
+
+    def _matvec(self, x: NDArray):
+        """ This is where the implementation of mat@vec should go. """
+        return self.matrix @ x.reshape(-1, 1)
+
+
 class MockOrbitalHessianAction(LinearOperator):
     """ GMRES helper. Calculates the result of `orbital_hessian @ vector` """
 
@@ -261,6 +274,42 @@ def find_polarizabilities_iteratively(
         for xyz in ["x", "y", "z"]
     }
 
+    print(
+        f'{np.allclose(
+            0.5 * orbital_hessian @ response["x"],
+            dipole_moment["x"],
+        )=}'
+    )
+
+    nva = nmo-noa
+    dim_a = noa * nva
+    new_h_aa = orbital_hessian[:dim_a, :dim_a].reshape(noa, nva, noa, nva)
+    print(f'{np.allclose(h_aa, new_h_aa)=}')
+    nvb = nmo-nob
+    dim_b = nob * nvb
+    new_h_ab = orbital_hessian[:dim_a, -dim_b:].reshape(noa, nva, nob, nvb)
+    print(f'{new_h_ab.shape=}')
+
+    print(f'{response['x'].shape=}')
+    response_x_a = response["x"][:dim_a].reshape(noa, nva)
+    response_x_b = response["x"][dim_a:].reshape(nob, nvb)
+    print(f'{response_x_a.shape=}')
+    print(f'{response_x_b.shape=}')
+    dipole_moment_x_a = dipole_moment['x'][:dim_a].reshape(noa, nva)
+    print(f'{dipole_moment_x_a.shape=}')
+    print(f'{np.einsum("jbia,jb->ia", new_h_aa, response_x_a).shape=}')
+
+    print(
+        f'{np.allclose(
+            0.5 * (
+                np.einsum("iajb,jb->ia", new_h_aa, response_x_a)
+                +
+                np.einsum("iajb,jb->ia", new_h_ab, response_x_b)
+            ),
+            dipole_moment_x_a,
+        )=}'
+    )
+
     polarizabilities = {
         "xx":  2 * dipole_moment['x'] @ response['x'],
         "xy":  2 * dipole_moment['x'] @ response['y'],
@@ -295,20 +344,20 @@ def main():
     h_ba = build_h_ba(**intermediates)
     h_bb = build_h_bb(**intermediates)
 
-    pol_direct = find_polarizabilities_directly(
-        h_aa, h_ab, h_ba, h_bb, **intermediates
-    )
+    # pol_direct = find_polarizabilities_directly(
+    #     h_aa, h_ab, h_ba, h_bb, **intermediates
+    # )
 
-    print("Polarizabilities:")
-    print("1) from inverted HF orbitals Hessian:")
-    print_polarizabilities(pol_direct)
+    # print("Polarizabilities:")
+    # print("1) from inverted HF orbitals Hessian:")
+    # print_polarizabilities(pol_direct)
 
     pol_iterative = find_polarizabilities_iteratively(
         h_aa, h_ab, h_ba, h_bb, **intermediates
     )
 
-    print("2) from GMRES iterative solution:")
-    print_polarizabilities(pol_iterative)
+    # print("2) from GMRES iterative solution:")
+    # print_polarizabilities(pol_iterative)
 
 
 if __name__ == "__main__":
