@@ -3,6 +3,8 @@ import psi4
 import numpy as np
 from numpy import einsum
 from numpy.typing import NDArray
+from scipy.sparse.linalg import LinearOperator, gmres
+
 
 def extract_intermediates(wfn):
     Ca = wfn.Ca()
@@ -82,54 +84,54 @@ def extract_intermediates(wfn):
 
 def buld_h_aa(kd_aa, f_aa, va, oa, g_aaaa, **_) -> NDArray:
     h_aa = -1.00 * einsum('ab,ji->jbia', kd_aa[va, va], f_aa[oa, oa])
-    h_aa +=  1.00 * einsum('ij,ab->jbia', kd_aa[oa, oa], f_aa[va, va])
+    h_aa += 1.00 * einsum('ij,ab->jbia', kd_aa[oa, oa], f_aa[va, va])
     h_aa += -1.00 * einsum('ba,ij->jbia', kd_aa[va, va], f_aa[oa, oa])
-    h_aa +=  1.00 * einsum('ji,ba->jbia', kd_aa[oa, oa], f_aa[va, va])
+    h_aa += 1.00 * einsum('ji,ba->jbia', kd_aa[oa, oa], f_aa[va, va])
     h_aa += -1.00 * einsum('jiab->jbia', g_aaaa[oa, oa, va, va])
-    h_aa +=  1.00 * einsum('jabi->jbia', g_aaaa[oa, va, va, oa])
-    h_aa +=  1.00 * einsum('ibaj->jbia', g_aaaa[oa, va, va, oa])
+    h_aa += 1.00 * einsum('jabi->jbia', g_aaaa[oa, va, va, oa])
+    h_aa += 1.00 * einsum('ibaj->jbia', g_aaaa[oa, va, va, oa])
     h_aa += -1.00 * einsum('abji->jbia', g_aaaa[va, va, oa, oa])
 
     return h_aa
 
 
 def build_h_ab(g_abab, oa, ob, va, vb, **_) -> NDArray:
-    h_ab =  1.00 * einsum('jiba->jbia', g_abab[oa, ob, va, vb])
-    h_ab +=  1.00 * einsum('jabi->jbia', g_abab[oa, vb, va, ob])
-    h_ab +=  1.00 * einsum('bija->jbia', g_abab[va, ob, oa, vb])
-    h_ab +=  1.00 * einsum('baji->jbia', g_abab[va, vb, oa, ob])
+    h_ab = 1.00 * einsum('jiba->jbia', g_abab[oa, ob, va, vb])
+    h_ab += 1.00 * einsum('jabi->jbia', g_abab[oa, vb, va, ob])
+    h_ab += 1.00 * einsum('bija->jbia', g_abab[va, ob, oa, vb])
+    h_ab += 1.00 * einsum('baji->jbia', g_abab[va, vb, oa, ob])
     return h_ab
 
 
 def build_h_ba(g_abab, oa, ob, va, vb, **_) -> NDArray:
-    h_ba =  1.00 * einsum('ijab->jbia', g_abab[oa, ob, va, vb])
-    h_ba +=  1.00 * einsum('ajib->jbia', g_abab[va, ob, oa, vb])
-    h_ba +=  1.00 * einsum('ibaj->jbia', g_abab[oa, vb, va, ob])
-    h_ba +=  1.00 * einsum('abij->jbia', g_abab[va, vb, oa, ob])
+    h_ba = 1.00 * einsum('ijab->jbia', g_abab[oa, ob, va, vb])
+    h_ba += 1.00 * einsum('ajib->jbia', g_abab[va, ob, oa, vb])
+    h_ba += 1.00 * einsum('ibaj->jbia', g_abab[oa, vb, va, ob])
+    h_ba += 1.00 * einsum('abij->jbia', g_abab[va, vb, oa, ob])
     return h_ba
 
 
 def build_h_bb(g_bbbb, kd_bb, f_bb, vb, ob, **_) -> NDArray:
     h_bb = -1.00 * einsum('ab,ji->jbia', kd_bb[vb, vb], f_bb[ob, ob])
-    h_bb +=  1.00 * einsum('ij,ab->jbia', kd_bb[ob, ob], f_bb[vb, vb])
+    h_bb += 1.00 * einsum('ij,ab->jbia', kd_bb[ob, ob], f_bb[vb, vb])
     h_bb += -1.00 * einsum('ba,ij->jbia', kd_bb[vb, vb], f_bb[ob, ob])
-    h_bb +=  1.00 * einsum('ji,ba->jbia', kd_bb[ob, ob], f_bb[vb, vb])
+    h_bb += 1.00 * einsum('ji,ba->jbia', kd_bb[ob, ob], f_bb[vb, vb])
     h_bb += -1.00 * einsum('jiab->jbia', g_bbbb[ob, ob, vb, vb])
-    h_bb +=  1.00 * einsum('jabi->jbia', g_bbbb[ob, vb, vb, ob])
-    h_bb +=  1.00 * einsum('ibaj->jbia', g_bbbb[ob, vb, vb, ob])
+    h_bb += 1.00 * einsum('jabi->jbia', g_bbbb[ob, vb, vb, ob])
+    h_bb += 1.00 * einsum('ibaj->jbia', g_bbbb[ob, vb, vb, ob])
     h_bb += -1.00 * einsum('abji->jbia', g_bbbb[vb, vb, ob, ob])
     return h_bb
 
 
 def scf() -> tuple[float, Any]:
 
-    mol = psi4.geometry("""
+    _ = psi4.geometry("""
     0 1
     O1	0.00000   0.00000   0.11572
     H2	0.00000   0.74879  -0.46288
     H3	0.00000  -0.74879  -0.46288
     symmetry c1
-    """)   
+    """)
 
     psi4.set_options({'basis': 'cc-pvdz',
                       'scf_type': 'pk',
@@ -143,7 +145,7 @@ def scf() -> tuple[float, Any]:
     return energy, wfn
 
 
-def invert(h_aa, h_ab, h_ba, h_bb, nmo, noa, nob, **_):
+def build_complete_matrix(h_aa, h_ab, h_ba, h_bb, nmo, noa, nob, **_):
     # number of alpha- and beta-spin virtual orbitals
     nva = nmo - noa
     nvb = nmo - nob
@@ -156,48 +158,104 @@ def invert(h_aa, h_ab, h_ba, h_bb, nmo, noa, nob, **_):
 
     # pack into super matrix
     h = np.block([[h_aa, h_ab], [h_ba, h_bb]])
+    return h
 
-    # invert super matrix
-    hinv = np.linalg.inv(h)
-    return hinv
 
-def find_polarizabilities(
-    hinv,
+def find_polarizabilities_directly(
+    h_aa, h_ab, h_ba, h_bb,
+    nmo, noa, nob,
     mua_x, mua_y, mua_z,
     mub_x, mub_y, mub_z,
     oa, va, ob, vb,
     **_,
 ):
+    h_complete = build_complete_matrix(h_aa, h_ab, h_ba, h_bb, nmo, noa, nob)
+    hinv = np.linalg.inv(h_complete)
     # combine spin dipole integrals into a single vector the length of hinv
     mu_x_vec = np.hstack((mua_x[oa, va].flatten(), mub_x[ob, vb].flatten()))
     mu_y_vec = np.hstack((mua_y[oa, va].flatten(), mub_y[ob, vb].flatten()))
     mu_z_vec = np.hstack((mua_z[oa, va].flatten(), mub_z[ob, vb].flatten()))
 
     # response vectors
-    kappa_x = 2 * einsum('pq,q->p', hinv, mu_x_vec) 
+    kappa_x = 2 * einsum('pq,q->p', hinv, mu_x_vec)
     kappa_y = 2 * einsum('pq,q->p', hinv, mu_y_vec)
-    kappa_z = 2 * einsum('pq,q->p', hinv, mu_z_vec) 
+    kappa_z = 2 * einsum('pq,q->p', hinv, mu_z_vec)
 
-    print('')
-    print('    ==> Static Dipole Polarizability <==')
-    print('')
+    polarizabilities = {
+        "xx":  2 * einsum('p,p->', mu_x_vec, kappa_x),
+        "xy":  2 * einsum('p,p->', mu_x_vec, kappa_y),
+        "xz":  2 * einsum('p,p->', mu_x_vec, kappa_z),
+        "yy":  2 * einsum('p,p->', mu_y_vec, kappa_y),
+        "yz":  2 * einsum('p,p->', mu_y_vec, kappa_z),
+        "zz":  2 * einsum('p,p->', mu_z_vec, kappa_z),
+    }
 
-    alpha_xx = 2 * einsum('p,p->', mu_x_vec, kappa_x)
-    alpha_xy = 2 * einsum('p,p->', mu_x_vec, kappa_y)
-    alpha_xz = 2 * einsum('p,p->', mu_x_vec, kappa_z)
-    alpha_yy = 2 * einsum('p,p->', mu_y_vec, kappa_y)
-    alpha_yz = 2 * einsum('p,p->', mu_y_vec, kappa_z)
-    alpha_zz = 2 * einsum('p,p->', mu_z_vec, kappa_z)
+    return polarizabilities
+
+
+def gmres_solve(matrix: NDArray, rhs: NDArray) -> NDArray:
+    """
+    solves `matrix @ solution = rhs`
+    """
+    solution, exit_code = gmres(matrix, rhs, rtol=1e-12)
+    if exit_code != 0:
+        raise RuntimeError("GMRES didn't converge")
+    return solution
+
+
+def find_polarizabilities_iteratively(
+    h_aa, h_ab, h_ba, h_bb,
+    nmo, noa, nob,
+    mua_x, mua_y, mua_z,
+    mub_x, mub_y, mub_z,
+    oa, va, ob, vb,
+    **_,
+):
+    """
+    Solve the equation
+    `orbital_hessian @ response = dipole_moment`
+    for the `response` using the GMRES iterative algorithm.
+    """
+    orbital_hessian = build_complete_matrix(
+        h_aa, h_ab, h_ba, h_bb, nmo, noa, nob
+    )
+
+    # combine spin dipole integrals into a single vector the length of hinv
+    dipole_moment = {
+        "x": np.hstack((mua_x[oa, va].flatten(), mub_x[ob, vb].flatten())),
+        "y": np.hstack((mua_y[oa, va].flatten(), mub_y[ob, vb].flatten())),
+        "z": np.hstack((mua_z[oa, va].flatten(), mub_z[ob, vb].flatten())),
+    }
+
+    response = {
+        xyz: 2 * gmres_solve(orbital_hessian, dipole_moment[xyz])
+        for xyz in ["x", "y", "z"]
+    }
+
+    polarizabilities = {
+        "xx":  2 * dipole_moment['x'] @ response['x'],
+        "xy":  2 * dipole_moment['x'] @ response['y'],
+        "xz":  2 * dipole_moment['x'] @ response['z'],
+        "yy":  2 * dipole_moment['y'] @ response['y'],
+        "yz":  2 * dipole_moment['y'] @ response['z'],
+        "zz":  2 * dipole_moment['z'] @ response['z'],
+    }
+
+    return polarizabilities
+
+
+def print_polarizabilities(pol):
+    header = '==> Static Dipole Polarizability <=='
+    width = len(header)
+    print()
+    print(header.center(width))
+    print()
 
     pad = ' ' * 2
     fmt = '9.4f'
-    print(f'{pad}{alpha_xx=:{fmt}}')
-    print(f'{pad}{alpha_xy=:{fmt}}')
-    print(f'{pad}{alpha_xz=:{fmt}}')
-    print(f'{pad}{alpha_yy=:{fmt}}')
-    print(f'{pad}{alpha_yz=:{fmt}}')
-    print(f'{pad}{alpha_zz=:{fmt}}')
-    print('')
+    for key, val in pol.items():
+        print(f'{pad}{key} = {val:{fmt}}'.center(width))
+    print()
 
 
 def main():
@@ -208,8 +266,20 @@ def main():
     h_ba = build_h_ba(**intermediates)
     h_bb = build_h_bb(**intermediates)
 
-    h_inv = invert(h_aa, h_ab, h_ba, h_bb, **intermediates)
-    find_polarizabilities(h_inv, **intermediates)
+    pol_direct = find_polarizabilities_directly(
+        h_aa, h_ab, h_ba, h_bb, **intermediates
+    )
+
+    print("Polarizabilities:")
+    print("1) from inverted HF orbitals Hessian:")
+    print_polarizabilities(pol_direct)
+
+    pol_iterative = find_polarizabilities_iteratively(
+        h_aa, h_ab, h_ba, h_bb, **intermediates
+    )
+
+    print("2) from GMRES iterative solution:")
+    print_polarizabilities(pol_iterative)
 
 
 if __name__ == "__main__":
