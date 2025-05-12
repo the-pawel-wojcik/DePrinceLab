@@ -1,22 +1,31 @@
 from typing import Any, TypeVar
 import psi4
+from psi4.core import Wavefunction, Matrix
 import numpy as np
 from numpy import einsum
 from numpy.typing import NDArray
 from scipy.sparse.linalg import LinearOperator, gmres
 
 
-def extract_intermediates(wfn):
-    Ca = wfn.Ca()
-    Cb = wfn.Cb()
+def extract_intermediates(wfn: Wavefunction):
+    orbitals_up: Matrix = wfn.Ca()
+    orbitals_down: Matrix = wfn.Cb()
 
     # use Psi4's MintsHelper to generate ERIs and dipole integrals
     mints = psi4.core.MintsHelper(wfn.basisset())
 
     # build the integrals in chemists' notation
-    g_aaaa = np.asarray(mints.mo_eri(Ca, Ca, Ca, Ca))
-    g_aabb = np.asarray(mints.mo_eri(Ca, Ca, Cb, Cb))
-    g_bbbb = np.asarray(mints.mo_eri(Cb, Cb, Cb, Cb))
+    g_aaaa = np.asarray(mints.mo_eri(
+        orbitals_up, orbitals_up, orbitals_up, orbitals_up)
+    )
+    g_aabb = np.asarray(
+        mints.mo_eri(orbitals_up, orbitals_up, orbitals_down, orbitals_down)
+    )
+    g_bbbb = np.asarray(
+        mints.mo_eri(
+            orbitals_down, orbitals_down, orbitals_down, orbitals_down
+        )
+    )
 
     # antisymmetrized integrals in physicists' notation
     g_aaaa = g_aaaa.transpose(0, 2, 1, 3) - g_aaaa.transpose(0, 2, 3, 1)
@@ -32,8 +41,8 @@ def extract_intermediates(wfn):
     vb = slice(nob, None)
 
     nmo = wfn.nmo()
-    kd_aa = np.eye(nmo)
-    kd_bb = np.eye(nmo)
+    identity_aa = np.eye(nmo)
+    identity_bb = np.eye(nmo)
 
     # orbital energies
     f_aa = np.diag(wfn.epsilon_a())
@@ -47,16 +56,16 @@ def extract_intermediates(wfn):
     mu_z = np.asarray(mu[2])
 
     # transform the dipole integrals to the MO basis
-    Ca = np.asarray(Ca)
-    Cb = np.asarray(Cb)
+    orbitals_up = np.asarray(orbitals_up)
+    orbitals_down = np.asarray(orbitals_down)
 
-    mua_x = Ca.T @ mu_x @ Ca
-    mua_y = Ca.T @ mu_y @ Ca
-    mua_z = Ca.T @ mu_z @ Ca
+    mua_x = orbitals_up.T @ mu_x @ orbitals_up
+    mua_y = orbitals_up.T @ mu_y @ orbitals_up
+    mua_z = orbitals_up.T @ mu_z @ orbitals_up
 
-    mub_x = Cb.T @ mu_x @ Cb
-    mub_y = Cb.T @ mu_y @ Cb
-    mub_z = Cb.T @ mu_z @ Cb
+    mub_x = orbitals_down.T @ mu_x @ orbitals_down
+    mub_y = orbitals_down.T @ mu_y @ orbitals_down
+    mub_z = orbitals_down.T @ mu_z @ orbitals_down
 
     return {
         'mua_x': mua_x,
@@ -65,8 +74,8 @@ def extract_intermediates(wfn):
         'mub_x': mub_x,
         'mub_y': mub_y,
         'mub_z': mub_z,
-        'kd_aa': kd_aa,
-        'kd_bb': kd_bb,
+        'identity_aa': identity_aa,
+        'identity_bb': identity_bb,
         'f_aa': f_aa,
         'f_bb': f_bb,
         'va': va,
@@ -82,11 +91,11 @@ def extract_intermediates(wfn):
     }
 
 
-def buld_h_aa(kd_aa, f_aa, va, oa, g_aaaa, **_) -> NDArray:
-    h_aa = -1.00 * einsum('ab,ji->jbia', kd_aa[va, va], f_aa[oa, oa])
-    h_aa += 1.00 * einsum('ij,ab->jbia', kd_aa[oa, oa], f_aa[va, va])
-    h_aa += -1.00 * einsum('ba,ij->jbia', kd_aa[va, va], f_aa[oa, oa])
-    h_aa += 1.00 * einsum('ji,ba->jbia', kd_aa[oa, oa], f_aa[va, va])
+def buld_h_aa(identity_aa, f_aa, va, oa, g_aaaa, **_) -> NDArray:
+    h_aa = -1.00 * einsum('ab,ji->jbia', identity_aa[va, va], f_aa[oa, oa])
+    h_aa += 1.00 * einsum('ij,ab->jbia', identity_aa[oa, oa], f_aa[va, va])
+    h_aa += -1.00 * einsum('ba,ij->jbia', identity_aa[va, va], f_aa[oa, oa])
+    h_aa += 1.00 * einsum('ji,ba->jbia', identity_aa[oa, oa], f_aa[va, va])
     h_aa += -1.00 * einsum('jiab->jbia', g_aaaa[oa, oa, va, va])
     h_aa += 1.00 * einsum('jabi->jbia', g_aaaa[oa, va, va, oa])
     h_aa += 1.00 * einsum('ibaj->jbia', g_aaaa[oa, va, va, oa])
@@ -111,11 +120,11 @@ def build_h_ba(g_abab, oa, ob, va, vb, **_) -> NDArray:
     return h_ba
 
 
-def build_h_bb(g_bbbb, kd_bb, f_bb, vb, ob, **_) -> NDArray:
-    h_bb = -1.00 * einsum('ab,ji->jbia', kd_bb[vb, vb], f_bb[ob, ob])
-    h_bb += 1.00 * einsum('ij,ab->jbia', kd_bb[ob, ob], f_bb[vb, vb])
-    h_bb += -1.00 * einsum('ba,ij->jbia', kd_bb[vb, vb], f_bb[ob, ob])
-    h_bb += 1.00 * einsum('ji,ba->jbia', kd_bb[ob, ob], f_bb[vb, vb])
+def build_h_bb(g_bbbb, identity_bb, f_bb, vb, ob, **_) -> NDArray:
+    h_bb = -1.00 * einsum('ab,ji->jbia', identity_bb[vb, vb], f_bb[ob, ob])
+    h_bb += 1.00 * einsum('ij,ab->jbia', identity_bb[ob, ob], f_bb[vb, vb])
+    h_bb += -1.00 * einsum('ba,ij->jbia', identity_bb[vb, vb], f_bb[ob, ob])
+    h_bb += 1.00 * einsum('ji,ba->jbia', identity_bb[ob, ob], f_bb[vb, vb])
     h_bb += -1.00 * einsum('jiab->jbia', g_bbbb[ob, ob, vb, vb])
     h_bb += 1.00 * einsum('jabi->jbia', g_bbbb[ob, vb, vb, ob])
     h_bb += 1.00 * einsum('ibaj->jbia', g_bbbb[ob, vb, vb, ob])
@@ -123,7 +132,7 @@ def build_h_bb(g_bbbb, kd_bb, f_bb, vb, ob, **_) -> NDArray:
     return h_bb
 
 
-def scf() -> tuple[float, Any]:
+def scf() -> tuple[float, Wavefunction]:
 
     _ = psi4.geometry("""
     0 1
@@ -146,11 +155,11 @@ def scf() -> tuple[float, Any]:
 
 
 def build_complete_matrix(h_aa, h_ab, h_ba, h_bb, nmo, noa, nob, **_):
-    # number of alpha- and beta-spin virtual orbitals
+    # number of virtual orbital with spin up (ap) or down (bown)
     nva = nmo - noa
     nvb = nmo - nob
 
-    # reshape tensors
+    # reshape matrices
     h_aa = h_aa.reshape(noa*nva, noa*nva)
     h_ab = h_ab.reshape(noa*nva, nob*nvb)
     h_ba = h_ba.reshape(nob*nvb, noa*nva)
@@ -206,7 +215,7 @@ def gmres_solve(matrix: NDArray | MatrixLike, rhs: NDArray) -> NDArray:
     return solution
 
 
-class OrbitalHessianAction(LinearOperator):
+class MockOrbitalHessianAction(LinearOperator):
     """ GMRES helper. Calculates the result of `orbital_hessian @ vector` """
 
     def __init__(self: Any, matrix: NDArray) -> None:
@@ -238,7 +247,7 @@ def find_polarizabilities_iteratively(
         h_aa, h_ab, h_ba, h_bb, nmo, noa, nob
     )
 
-    orbital_hessian_action = OrbitalHessianAction(orbital_hessian)
+    orbital_hessian_action = MockOrbitalHessianAction(orbital_hessian)
 
     # combine spin dipole integrals into a single vector the length of hinv
     dipole_moment = {
