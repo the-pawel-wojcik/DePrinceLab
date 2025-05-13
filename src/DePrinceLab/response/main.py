@@ -202,10 +202,10 @@ def find_polarizabilities_directly(
     return polarizabilities
 
 
-MatrixLike = TypeVar('MatrixLike', bound=LinearOperator, contravariant=True)
+MatmulLike = TypeVar('MatmulLike', bound=LinearOperator, contravariant=True)
 
 
-def gmres_solve(matrix: NDArray | MatrixLike, rhs: NDArray) -> NDArray:
+def gmres_solve(matrix: NDArray | MatmulLike, rhs: NDArray) -> NDArray:
     """
     solves `matrix @ solution = rhs`
     """
@@ -218,14 +218,152 @@ def gmres_solve(matrix: NDArray | MatrixLike, rhs: NDArray) -> NDArray:
 class OrbitalHessianAction(LinearOperator):
     """ GMRES helper. Calculates the result of `orbital_hessian @ vector` """
 
-    def __init__(self: Any, shape: tuple[int, ...], dtype: np.dtype) -> None:
-        """ Scipy says that these are always needed. """
-        self.shape = shape
-        self.dtype = dtype
+    def __init__(
+        self: Any,
+        nmo: int,
+        noa: int,
+        nob: int,
+        identity_aa: NDArray,
+        identity_bb: NDArray,
+        va: slice,
+        oa: slice,
+        vb: slice,
+        ob: slice,
+        fock_aa: NDArray,
+        fock_bb: NDArray,
+        g_aaaa: NDArray,
+        g_abab: NDArray,
+        g_bbbb: NDArray,
+        **_,
+    ) -> None:
+        # These are needed for the action
+        self.n_occuped_up = noa
+        self.n_valence_up = nmo - noa
+        self.n_occuped_down = nob
+        self.n_valence_down = nmo - nob
+        self.identity_aa = identity_aa
+        self.identity_bb = identity_bb
+        self.valence_slice_up = va
+        self.occupied_slice_up = oa
+        self.valence_slice_down = vb
+        self.occupied_slice_down = ob
+        self.fock_aa = fock_aa
+        self.fock_bb = fock_bb
+        self.g_aaaa = g_aaaa
+        self.g_abab = g_abab
+        self.g_bbbb = g_bbbb
+        """ Scipy needs these. """
+        self.dtype = fock_aa.dtype
+        dim = noa * (nmo-noa) + nob * (nmo-nob)
+        self.shape = (dim, dim)
+
+    def _matuu_times_up(self, up: NDArray):
+        id_aa = self.identity_aa
+        f_aa = self.fock_aa
+        va = self.valence_slice_up
+        oa = self.occupied_slice_up
+        g_aaaa = self.g_aaaa
+
+        out = -1.00 * einsum(
+            'ab,ji,ia->jb', id_aa[va, va], f_aa[oa, oa], up
+        )
+        out += 1.00 * einsum(
+            'ij,ab,ia->jb', id_aa[oa, oa], f_aa[va, va], up
+        )
+        out += -1.00 * einsum(
+            'ba,ij,ia->jb', id_aa[va, va], f_aa[oa, oa], up
+        )
+        out += 1.00 * einsum(
+            'ji,ba,ia->jb', id_aa[oa, oa], f_aa[va, va], up
+        )
+        out += -1.00 * einsum(
+            'jiab,ia->jb', g_aaaa[oa, oa, va, va], up
+        )
+        out += 1.00 * einsum(
+            'jabi,ia->jb', g_aaaa[oa, va, va, oa], up
+        )
+        out += 1.00 * einsum(
+            'ibaj,ia->jb', g_aaaa[oa, va, va, oa], up
+        )
+        out += -1.00 * einsum(
+            'abji,ia->jb', g_aaaa[va, va, oa, oa], up
+        )
+        return out
+
+    def _matud_times_down(self, down: NDArray) -> NDArray:
+        g_abab = self.g_abab
+        oa = self.occupied_slice_up
+        ob = self.occupied_slice_down
+        va = self.valence_slice_up
+        vb = self.valence_slice_down
+        out = 1.00 * einsum('jiba,ia->jb', g_abab[oa, ob, va, vb], down)
+        out += 1.00 * einsum('jabi,ia->jb', g_abab[oa, vb, va, ob], down)
+        out += 1.00 * einsum('bija,ia->jb', g_abab[va, ob, oa, vb], down)
+        out += 1.00 * einsum('baji,ia->jb', g_abab[va, vb, oa, ob], down)
+        return out
+
+    def _matdu_times_up(self, up: NDArray) -> NDArray:
+        g_abab = self.g_abab
+        oa = self.occupied_slice_up
+        va = self.valence_slice_up
+        ob = self.occupied_slice_down
+        vb = self.valence_slice_down
+
+        out = 1.00 * einsum('ijab,ia->jb', g_abab[oa, ob, va, vb], up)
+        out += 1.00 * einsum('ajib,ia->jb', g_abab[va, ob, oa, vb], up)
+        out += 1.00 * einsum('ibaj,ia->jb', g_abab[oa, vb, va, ob], up)
+        out += 1.00 * einsum('abij,ia->jb', g_abab[va, vb, oa, ob], up)
+
+        return out
+
+    def _matdd_times_down(self, down: NDArray) -> NDArray:
+        id_bb = self.identity_bb
+        f_bb = self.fock_bb
+        g_bbbb = self.g_bbbb
+
+        vb = self.valence_slice_down
+        ob = self.occupied_slice_down
+
+        out = -1.00 * einsum(
+            'ab,ji,ia->jb', id_bb[vb, vb], f_bb[ob, ob], down
+        )
+        out += 1.00 * einsum(
+            'ij,ab,ia->jb', id_bb[ob, ob], f_bb[vb, vb], down
+        )
+        out += -1.00 * einsum(
+            'ba,ij,ia->jb', id_bb[vb, vb], f_bb[ob, ob], down
+        )
+        out += 1.00 * einsum(
+            'ji,ba,ia->jb', id_bb[ob, ob], f_bb[vb, vb], down
+        )
+        out += -1.00 * einsum(
+            'jiab,ia->jb', g_bbbb[ob, ob, vb, vb], down
+        )
+        out += 1.00 * einsum(
+            'jabi,ia->jb', g_bbbb[ob, vb, vb, ob], down
+        )
+        out += 1.00 * einsum(
+            'ibaj,ia->jb', g_bbbb[ob, vb, vb, ob], down
+        )
+        out += -1.00 * einsum(
+            'abji,ia->jb', g_bbbb[vb, vb, ob, ob], down
+        )
+
+        return out
 
     def _matvec(self, x: NDArray):
         """ This is where the implementation of mat@vec should go. """
-        return self.matrix @ x.reshape(-1, 1)
+
+        dim_up = self.n_occuped_up * self.n_valence_up
+        up = x[:dim_up].reshape(self.n_occuped_up, self.n_valence_up)
+        dim_down = self.n_occuped_down * self.n_valence_down
+        down = x[-dim_down:].reshape(self.n_occuped_down, self.n_valence_down)
+
+        out_up = self._matuu_times_up(up) + self._matud_times_down(down)
+        out_down = self._matdu_times_up(up) + self._matdd_times_down(down)
+
+        out = np.hstack((out_up.flatten(), out_down.flatten()))
+        return out
 
 
 class MockOrbitalHessianAction(LinearOperator):
@@ -241,6 +379,46 @@ class MockOrbitalHessianAction(LinearOperator):
     def _matvec(self, x: NDArray):
         """ This is where the implementation of mat@vec should go. """
         return self.matrix @ x.reshape(-1, 1)
+
+
+def find_polarizabilities_iteratively_no_storage(
+    orbital_hessian_action: MatmulLike,
+    mua_x: NDArray, mua_y: NDArray, mua_z: NDArray,
+    mub_x: NDArray, mub_y: NDArray, mub_z: NDArray,
+    oa, va, ob, vb,
+    **_,
+):
+    """
+    Solve the equation
+    `orbital_hessian @ response = dipole_moment`
+    for the `response` using the GMRES iterative algorithm.
+
+    Use the GMRES version which does not store the orbital_hessian matrix,
+    but instead uses the operator that calculates the `orbital_hessian@vector`
+    value.
+    """
+    # combine spin dipole integrals into a single vector the length of hinv
+    dipole_moment = {
+        "x": np.hstack((mua_x[oa, va].flatten(), mub_x[ob, vb].flatten())),
+        "y": np.hstack((mua_y[oa, va].flatten(), mub_y[ob, vb].flatten())),
+        "z": np.hstack((mua_z[oa, va].flatten(), mub_z[ob, vb].flatten())),
+    }
+
+    response = {
+        xyz: 2 * gmres_solve(orbital_hessian_action, dipole_moment[xyz])
+        for xyz in ["x", "y", "z"]
+    }
+
+    polarizabilities = {
+        "xx":  2 * dipole_moment['x'] @ response['x'],
+        "xy":  2 * dipole_moment['x'] @ response['y'],
+        "xz":  2 * dipole_moment['x'] @ response['z'],
+        "yy":  2 * dipole_moment['y'] @ response['y'],
+        "yz":  2 * dipole_moment['y'] @ response['z'],
+        "zz":  2 * dipole_moment['z'] @ response['z'],
+    }
+
+    return polarizabilities
 
 
 def find_polarizabilities_iteratively(
@@ -273,42 +451,6 @@ def find_polarizabilities_iteratively(
         xyz: 2 * gmres_solve(orbital_hessian_action, dipole_moment[xyz])
         for xyz in ["x", "y", "z"]
     }
-
-    print(
-        f'{np.allclose(
-            0.5 * orbital_hessian @ response["x"],
-            dipole_moment["x"],
-        )=}'
-    )
-
-    nva = nmo-noa
-    dim_a = noa * nva
-    new_h_aa = orbital_hessian[:dim_a, :dim_a].reshape(noa, nva, noa, nva)
-    print(f'{np.allclose(h_aa, new_h_aa)=}')
-    nvb = nmo-nob
-    dim_b = nob * nvb
-    new_h_ab = orbital_hessian[:dim_a, -dim_b:].reshape(noa, nva, nob, nvb)
-    print(f'{new_h_ab.shape=}')
-
-    print(f'{response['x'].shape=}')
-    response_x_a = response["x"][:dim_a].reshape(noa, nva)
-    response_x_b = response["x"][dim_a:].reshape(nob, nvb)
-    print(f'{response_x_a.shape=}')
-    print(f'{response_x_b.shape=}')
-    dipole_moment_x_a = dipole_moment['x'][:dim_a].reshape(noa, nva)
-    print(f'{dipole_moment_x_a.shape=}')
-    print(f'{np.einsum("jbia,jb->ia", new_h_aa, response_x_a).shape=}')
-
-    print(
-        f'{np.allclose(
-            0.5 * (
-                np.einsum("iajb,jb->ia", new_h_aa, response_x_a)
-                +
-                np.einsum("iajb,jb->ia", new_h_ab, response_x_b)
-            ),
-            dipole_moment_x_a,
-        )=}'
-    )
 
     polarizabilities = {
         "xx":  2 * dipole_moment['x'] @ response['x'],
@@ -356,8 +498,19 @@ def main():
         h_aa, h_ab, h_ba, h_bb, **intermediates
     )
 
-    # print("2) from GMRES iterative solution:")
-    # print_polarizabilities(pol_iterative)
+    print("2) from GMRES iterative solution:")
+    print_polarizabilities(pol_iterative)
+
+    orbital_hessian_action = OrbitalHessianAction(
+        fock_aa=intermediates['f_aa'],
+        fock_bb=intermediates['f_bb'],
+        **intermediates,
+    )
+    pol_iterative = find_polarizabilities_iteratively_no_storage(
+        orbital_hessian_action, **intermediates
+    )
+    print("3) from GMRES iterative solution (no hessian storage):")
+    print_polarizabilities(pol_iterative)
 
 
 if __name__ == "__main__":
