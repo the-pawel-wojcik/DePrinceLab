@@ -1,3 +1,4 @@
+from DePrinceLab.response.intermediates_builders import Intermediates
 import numpy as np
 from numpy import einsum
 from numpy.typing import NDArray
@@ -28,24 +29,23 @@ class MockOrbitalHessianAction(LinearOperator):
 class OrbitalHessianAction(LinearOperator):
     """ GMRES helper. Calculates the result of `orbital_hessian @ vector` """
 
-    def __init__(
-        self: Any,
-        nmo: int,
-        noa: int,
-        nob: int,
-        identity_aa: NDArray,
-        identity_bb: NDArray,
-        va: slice,
-        oa: slice,
-        vb: slice,
-        ob: slice,
-        fock_aa: NDArray,
-        fock_bb: NDArray,
-        g_aaaa: NDArray,
-        g_abab: NDArray,
-        g_bbbb: NDArray,
-        **_,
-    ) -> None:
+    def __init__(self: Any, intermediates: Intermediates) -> None:
+        self.intermediates = intermediates
+        nmo = intermediates.nmo
+        noa = intermediates.noa
+        nob = intermediates.nob
+        identity_aa = intermediates.identity_aa
+        identity_bb = intermediates.identity_bb
+        va = intermediates.va
+        oa = intermediates.oa
+        vb = intermediates.vb
+        ob = intermediates.ob
+        fock_aa = intermediates.f_aa
+        fock_bb = intermediates.f_bb
+        g_aaaa = intermediates.g_aaaa
+        g_abab = intermediates.g_abab
+        g_bbbb = intermediates.g_bbbb
+
         # These are needed for the action
         self.n_occuped_up = noa
         self.n_valence_up = nmo - noa
@@ -62,6 +62,7 @@ class OrbitalHessianAction(LinearOperator):
         self.g_aaaa = g_aaaa
         self.g_abab = g_abab
         self.g_bbbb = g_bbbb
+
         """ Scipy needs these. """
         self.dtype = fock_aa.dtype
         dim = noa * (nmo-noa) + nob * (nmo-nob)

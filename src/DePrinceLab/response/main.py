@@ -5,10 +5,10 @@ from DePrinceLab.response.operators import (
 )
 from DePrinceLab.response.electronic_structure import scf
 from DePrinceLab.response.hf_orbital_hessian_builders import (
-    buld_h_aa, build_h_ab, build_h_ba, build_h_bb, build_complete_matrix,
+    build_complete_matrix,
 )
 from DePrinceLab.response.intermediates_builders import (
-    extract_intermediates,
+    extract_intermediates, Intermediates
 )
 import numpy as np
 from numpy import einsum
@@ -16,21 +16,27 @@ from numpy.typing import NDArray
 from scipy.sparse.linalg import gmres
 
 
-def find_polarizabilities_directly(
-    h_aa, h_ab, h_ba, h_bb,
-    nmo, noa, nob,
-    mua_x, mua_y, mua_z,
-    mub_x, mub_y, mub_z,
-    oa, va, ob, vb,
-    **_,
-):
-    h_complete = build_complete_matrix(h_aa, h_ab, h_ba, h_bb, nmo, noa, nob)
-    hinv = np.linalg.inv(h_complete)
+def find_polarizabilities_directly(intermediates: Intermediates):
+
+    mub_x = intermediates.mub_x
+    mua_x = intermediates.mua_x
+    mua_y = intermediates.mua_y
+    mub_y = intermediates.mub_y
+    mua_z = intermediates.mua_z
+    mub_z = intermediates.mub_z
+
+    oa = intermediates.oa
+    va = intermediates. va
+    ob = intermediates.ob
+    vb = intermediates.vb
+
     # combine spin dipole integrals into a single vector the length of hinv
     mu_x_vec = np.hstack((mua_x[oa, va].flatten(), mub_x[ob, vb].flatten()))
     mu_y_vec = np.hstack((mua_y[oa, va].flatten(), mub_y[ob, vb].flatten()))
     mu_z_vec = np.hstack((mua_z[oa, va].flatten(), mub_z[ob, vb].flatten()))
 
+    h_complete = build_complete_matrix(intermediates)
+    hinv = np.linalg.inv(h_complete)
     # response vectors
     kappa_x = 2 * einsum('pq,q->p', hinv, mu_x_vec)
     kappa_y = 2 * einsum('pq,q->p', hinv, mu_y_vec)
@@ -58,13 +64,7 @@ def gmres_solve(matrix: NDArray | MatmulLike, rhs: NDArray) -> NDArray:
     return solution
 
 
-def find_polarizabilities_iteratively_no_storage(
-    orbital_hessian_action: MatmulLike,
-    mua_x: NDArray, mua_y: NDArray, mua_z: NDArray,
-    mub_x: NDArray, mub_y: NDArray, mub_z: NDArray,
-    oa, va, ob, vb,
-    **_,
-):
+def find_polarizabilities_iteratively_no_storage(intermediates: Intermediates):
     """
     Solve the equation
     `orbital_hessian @ response = dipole_moment`
@@ -74,7 +74,19 @@ def find_polarizabilities_iteratively_no_storage(
     but instead uses the operator that calculates the `orbital_hessian@vector`
     value.
     """
+    orbital_hessian_action = OrbitalHessianAction(intermediates)
+
     # combine spin dipole integrals into a single vector the length of hinv
+    mua_x = intermediates. mua_x
+    mua_y = intermediates.mua_y
+    mua_z = intermediates.mua_z
+    mub_x = intermediates.mub_x
+    mub_y = intermediates.mub_y
+    mub_z = intermediates.mub_z
+    oa = intermediates.oa
+    va = intermediates.va
+    ob = intermediates.ob
+    vb = intermediates.vb
     dipole_moment = {
         "x": np.hstack((mua_x[oa, va].flatten(), mub_x[ob, vb].flatten())),
         "y": np.hstack((mua_y[oa, va].flatten(), mub_y[ob, vb].flatten())),
@@ -98,26 +110,27 @@ def find_polarizabilities_iteratively_no_storage(
     return polarizabilities
 
 
-def find_polarizabilities_iteratively(
-    h_aa, h_ab, h_ba, h_bb,
-    nmo, noa, nob,
-    mua_x, mua_y, mua_z,
-    mub_x, mub_y, mub_z,
-    oa, va, ob, vb,
-    **_,
-):
+def find_polarizabilities_iteratively(intermediates: Intermediates):
     """
     Solve the equation
     `orbital_hessian @ response = dipole_moment`
     for the `response` using the GMRES iterative algorithm.
     """
-    orbital_hessian = build_complete_matrix(
-        h_aa, h_ab, h_ba, h_bb, nmo, noa, nob
-    )
 
+    orbital_hessian = build_complete_matrix(intermediates)
     orbital_hessian_action = MockOrbitalHessianAction(orbital_hessian)
 
     # combine spin dipole integrals into a single vector the length of hinv
+    mua_x = intermediates.mua_x
+    mua_y = intermediates.mua_y
+    mua_z = intermediates.mua_z
+    mub_x = intermediates.mub_x
+    mub_y = intermediates.mub_y
+    mub_z = intermediates.mub_z
+    oa = intermediates.oa
+    va = intermediates.va
+    ob = intermediates.ob
+    vb = intermediates.vb
     dipole_moment = {
         "x": np.hstack((mua_x[oa, va].flatten(), mub_x[ob, vb].flatten())),
         "y": np.hstack((mua_y[oa, va].flatten(), mub_y[ob, vb].flatten())),
@@ -158,40 +171,27 @@ def print_polarizabilities(pol):
 def main():
     _, wfn = scf()
     intermediates = extract_intermediates(wfn)
-    h_aa = buld_h_aa(**intermediates)
-    h_ab = build_h_ab(**intermediates)
-    h_ba = build_h_ba(**intermediates)
-    h_bb = build_h_bb(**intermediates)
 
     print("Polarizabilities:")
 
     do_direct = True
     if do_direct:
-        pol_direct = find_polarizabilities_directly(
-            h_aa, h_ab, h_ba, h_bb, **intermediates
-        )
+        pol_direct = find_polarizabilities_directly(intermediates)
 
         print("1) from inverted HF orbitals Hessian:")
         print_polarizabilities(pol_direct)
 
     do_iterative = True
     if do_iterative:
-        pol_iterative = find_polarizabilities_iteratively(
-            h_aa, h_ab, h_ba, h_bb, **intermediates
-        )
+        pol_iterative = find_polarizabilities_iteratively(intermediates)
 
         print("2) from GMRES iterative solution:")
         print_polarizabilities(pol_iterative)
 
     do_action = True
     if do_action:
-        orbital_hessian_action = OrbitalHessianAction(
-            fock_aa=intermediates['f_aa'],
-            fock_bb=intermediates['f_bb'],
-            **intermediates,
-        )
         pol_iterative = find_polarizabilities_iteratively_no_storage(
-            orbital_hessian_action, **intermediates
+            intermediates
         )
         print("3) from GMRES iterative solution (no hessian storage):")
         print_polarizabilities(pol_iterative)

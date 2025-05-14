@@ -1,9 +1,16 @@
+from DePrinceLab.response.intermediates_builders import Intermediates
 import numpy as np
 from numpy import einsum
 from numpy.typing import NDArray
 
 
-def buld_h_aa(identity_aa, f_aa, va, oa, g_aaaa, **_) -> NDArray:
+def build_h_aa(intermediates: Intermediates) -> NDArray:
+    identity_aa = intermediates.identity_aa
+    f_aa = intermediates.f_aa
+    va = intermediates.va
+    oa = intermediates.oa
+    g_aaaa = intermediates.g_aaaa
+
     h_aa = -1.00 * einsum('ab,ji->jbia', identity_aa[va, va], f_aa[oa, oa])
     h_aa += 1.00 * einsum('ij,ab->jbia', identity_aa[oa, oa], f_aa[va, va])
     h_aa += -1.00 * einsum('ba,ij->jbia', identity_aa[va, va], f_aa[oa, oa])
@@ -16,7 +23,13 @@ def buld_h_aa(identity_aa, f_aa, va, oa, g_aaaa, **_) -> NDArray:
     return h_aa
 
 
-def build_h_ab(g_abab, oa, ob, va, vb, **_) -> NDArray:
+def build_h_ab(intermediates: Intermediates) -> NDArray:
+    g_abab = intermediates.g_abab
+    va = intermediates.va
+    oa = intermediates.oa
+    vb = intermediates.vb
+    ob = intermediates.ob
+
     h_ab = 1.00 * einsum('jiba->jbia', g_abab[oa, ob, va, vb])
     h_ab += 1.00 * einsum('jabi->jbia', g_abab[oa, vb, va, ob])
     h_ab += 1.00 * einsum('bija->jbia', g_abab[va, ob, oa, vb])
@@ -24,7 +37,12 @@ def build_h_ab(g_abab, oa, ob, va, vb, **_) -> NDArray:
     return h_ab
 
 
-def build_h_ba(g_abab, oa, ob, va, vb, **_) -> NDArray:
+def build_h_ba(intermediates: Intermediates) -> NDArray:
+    g_abab = intermediates.g_abab
+    va = intermediates.va
+    oa = intermediates.oa
+    vb = intermediates.vb
+    ob = intermediates.ob
     h_ba = 1.00 * einsum('ijab->jbia', g_abab[oa, ob, va, vb])
     h_ba += 1.00 * einsum('ajib->jbia', g_abab[va, ob, oa, vb])
     h_ba += 1.00 * einsum('ibaj->jbia', g_abab[oa, vb, va, ob])
@@ -32,7 +50,13 @@ def build_h_ba(g_abab, oa, ob, va, vb, **_) -> NDArray:
     return h_ba
 
 
-def build_h_bb(g_bbbb, identity_bb, f_bb, vb, ob, **_) -> NDArray:
+def build_h_bb(intermediates: Intermediates) -> NDArray:
+    g_bbbb = intermediates.g_bbbb
+    identity_bb = intermediates.identity_bb
+    f_bb = intermediates.f_bb
+    vb = intermediates.vb
+    ob = intermediates.ob
+
     h_bb = -1.00 * einsum('ab,ji->jbia', identity_bb[vb, vb], f_bb[ob, ob])
     h_bb += 1.00 * einsum('ij,ab->jbia', identity_bb[ob, ob], f_bb[vb, vb])
     h_bb += -1.00 * einsum('ba,ij->jbia', identity_bb[vb, vb], f_bb[ob, ob])
@@ -44,7 +68,16 @@ def build_h_bb(g_bbbb, identity_bb, f_bb, vb, ob, **_) -> NDArray:
     return h_bb
 
 
-def build_complete_matrix(h_aa, h_ab, h_ba, h_bb, nmo, noa, nob, **_):
+def build_complete_matrix(intermediates: Intermediates):
+    nmo = intermediates.nmo
+    noa = intermediates.noa
+    nob = intermediates.nob
+
+    h_aa = build_h_aa(intermediates)
+    h_ab = build_h_ab(intermediates)
+    h_ba = build_h_ba(intermediates)
+    h_bb = build_h_bb(intermediates)
+
     # number of virtual orbital with spin up (ap) or down (bown)
     nva = nmo - noa
     nvb = nmo - nob

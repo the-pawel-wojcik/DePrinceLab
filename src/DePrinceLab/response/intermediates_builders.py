@@ -1,9 +1,34 @@
+from dataclasses import dataclass
 import numpy as np
+from numpy.typing import NDArray
 from psi4.core import Wavefunction, Matrix, MintsHelper
-from typing import Any
 
 
-def extract_intermediates(wfn: Wavefunction) -> dict[str, Any]:
+@dataclass
+class Intermediates:
+    mua_x: NDArray
+    mua_y: NDArray
+    mua_z: NDArray
+    mub_x: NDArray
+    mub_y: NDArray
+    mub_z: NDArray
+    identity_aa: NDArray
+    identity_bb: NDArray
+    f_aa: NDArray
+    f_bb: NDArray
+    va: slice
+    vb: slice
+    oa: slice
+    ob: slice
+    nmo: int
+    noa: int
+    nob: int
+    g_aaaa: NDArray
+    g_abab: NDArray
+    g_bbbb: NDArray
+
+
+def extract_intermediates(wfn: Wavefunction) -> Intermediates:
     orbitals_up: Matrix = wfn.Ca()
     orbitals_down: Matrix = wfn.Cb()
 
@@ -63,25 +88,25 @@ def extract_intermediates(wfn: Wavefunction) -> dict[str, Any]:
     mub_y = orbitals_down.T @ mu_y @ orbitals_down
     mub_z = orbitals_down.T @ mu_z @ orbitals_down
 
-    return {
-        'mua_x': mua_x,
-        'mua_y': mua_y,
-        'mua_z': mua_z,
-        'mub_x': mub_x,
-        'mub_y': mub_y,
-        'mub_z': mub_z,
-        'identity_aa': identity_aa,
-        'identity_bb': identity_bb,
-        'f_aa': f_aa,
-        'f_bb': f_bb,
-        'va': va,
-        'vb': vb,
-        'oa': oa,
-        'ob': ob,
-        'nmo': nmo,
-        'noa': noa,
-        'nob': nob,
-        'g_aaaa': g_aaaa,
-        'g_abab': g_abab,
-        'g_bbbb': g_bbbb,
-    }
+    return Intermediates(
+        mua_x=mua_x,
+        mua_y=mua_y,
+        mua_z=mua_z,
+        mub_x=mub_x,
+        mub_y=mub_y,
+        mub_z=mub_z,
+        identity_aa=identity_aa,
+        identity_bb=identity_bb,
+        f_aa=f_aa,
+        f_bb=f_bb,
+        va=va,
+        vb=vb,
+        oa=oa,
+        ob=ob,
+        nmo=nmo,
+        noa=noa,
+        nob=nob,
+        g_aaaa=g_aaaa,
+        g_abab=g_abab,
+        g_bbbb=g_bbbb,
+    )
