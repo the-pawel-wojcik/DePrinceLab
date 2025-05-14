@@ -1,4 +1,4 @@
-from DePrinceLab.response.operators import (
+from DePrinceLab.response.polarizabilities.operators import (
     MatmulLike,
 )
 from numpy.typing import NDArray

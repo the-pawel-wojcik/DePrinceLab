@@ -1,6 +1,5 @@
 import psi4
-from psi4.core import Wavefunction, Matrix
-
+from psi4.core import Wavefunction
 
 
 def scf() -> tuple[float, Wavefunction]:

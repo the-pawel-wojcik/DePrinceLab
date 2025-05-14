@@ -175,3 +175,70 @@ class OrbitalHessianAction(LinearOperator):
 
         out = np.hstack((out_up.flatten(), out_down.flatten()))
         return out
+
+
+class FasterOrbitalHessianAction(LinearOperator):
+    """ GMRES helper. Calculates the result of `orbital_hessian @ vector`.
+    Uses the trick from pdaggerq where the UCC allows to find the full
+    expression. """
+
+    def __init__(self: Any, intermediates: Intermediates) -> None:
+        self.intermediates = intermediates
+        noa = self.intermediates.noa
+        nmo = self.intermediates.nmo
+        nob = self.intermediates.nob
+
+        """ Scipy needs these. """
+        self.dtype = self.intermediates.f_aa.dtype
+        dim = noa * (nmo-noa) + nob * (nmo-nob)
+        self.shape = (dim, dim)
+
+    def _matvec(self, x: NDArray):
+        noa = self.intermediates.noa
+        nmo = self.intermediates.nmo
+        nva = nmo - noa
+        dim_up = noa * nva
+        t1_aa = x[:dim_up].reshape(noa, nva).T
+        nob = self.intermediates.nob
+        nvb = nmo - nob
+        dim_down = nob * nvb
+        t1_bb = x[-dim_down:].reshape(nob, nvb).T
+
+        f_aa = self.intermediates.f_aa
+        oa = self.intermediates.oa
+        va = self.intermediates.va
+        ob = self.intermediates.ob
+        vb = self.intermediates.vb
+        g_aaaa = self.intermediates.g_aaaa
+        g_abab = self.intermediates.g_abab
+        out_aa = -1.00 * einsum('ij,aj->ia', f_aa[oa, oa], t1_aa)
+        out_aa += 1.00 * einsum('ba,bi->ia', f_aa[va, va], t1_aa)
+        out_aa += -1.00 * einsum('ji,aj->ia', f_aa[oa, oa], t1_aa)
+        out_aa += 1.00 * einsum('ab,bi->ia', f_aa[va, va], t1_aa)
+        out_aa += -1.00 * einsum('jiab,bj->ia', g_aaaa[oa, oa, va, va], t1_aa)
+        out_aa += 1.00 * einsum('ijab,bj->ia', g_abab[oa, ob, va, vb], t1_bb)
+        out_aa += 1.00 * einsum('ibaj,bj->ia', g_aaaa[oa, va, va, oa], t1_aa)
+        out_aa += 1.00 * einsum('ibaj,bj->ia', g_abab[oa, vb, va, ob], t1_bb)
+        out_aa += 1.00 * einsum('jabi,bj->ia', g_aaaa[oa, va, va, oa], t1_aa)
+        out_aa += 1.00 * einsum('ajib,bj->ia', g_abab[va, ob, oa, vb], t1_bb)
+        out_aa += -1.00 * einsum('abji,bj->ia', g_aaaa[va, va, oa, oa], t1_aa)
+        out_aa += 1.00 * einsum('abij,bj->ia', g_abab[va, vb, oa, ob], t1_bb)
+
+        f_bb = self.intermediates.f_bb
+        g_bbbb = self.intermediates.g_bbbb
+        out_bb = -1.00 * einsum('ij,aj->ia', f_bb[ob, ob], t1_bb)
+        out_bb += 1.00 * einsum('ba,bi->ia', f_bb[vb, vb], t1_bb)
+        out_bb += -1.00 * einsum('ji,aj->ia', f_bb[ob, ob], t1_bb)
+        out_bb += 1.00 * einsum('ab,bi->ia', f_bb[vb, vb], t1_bb)
+        out_bb += 1.00 * einsum('jiba,bj->ia', g_abab[oa, ob, va, vb], t1_aa)
+        out_bb += -1.00 * einsum('jiab,bj->ia', g_bbbb[ob, ob, vb, vb], t1_bb)
+        out_bb += 1.00 * einsum('bija,bj->ia', g_abab[va, ob, oa, vb], t1_aa)
+        out_bb += 1.00 * einsum('ibaj,bj->ia', g_bbbb[ob, vb, vb, ob], t1_bb)
+        out_bb += 1.00 * einsum('jabi,bj->ia', g_abab[oa, vb, va, ob], t1_aa)
+        out_bb += 1.00 * einsum('jabi,bj->ia', g_bbbb[ob, vb, vb, ob], t1_bb)
+        out_bb += 1.00 * einsum('baji,bj->ia', g_abab[va, vb, oa, ob], t1_aa)
+        out_bb += -1.00 * einsum('abji,bj->ia', g_bbbb[vb, vb, ob, ob], t1_bb)
+
+        out = np.hstack((out_aa.flatten(), out_bb.flatten()))
+
+        return out

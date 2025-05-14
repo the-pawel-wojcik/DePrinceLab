@@ -1,23 +1,17 @@
 from DePrinceLab.response.intermediates_builders import (
     Intermediates,
 )
-from DePrinceLab.response.hf_orbital_hessian_builders import (
-    build_complete_matrix,
-)
-from DePrinceLab.response.operators import MockOrbitalHessianAction
+from DePrinceLab.response.polarizabilities.operators import MatmulLike
 from DePrinceLab.response.polarizabilities.core import gmres_solve
 import numpy as np
 
 
-def calculate(intermediates: Intermediates):
+def calculate(hessian_action: MatmulLike, intermediates: Intermediates):
     """
     Solve the equation
     `orbital_hessian @ response = dipole_moment`
     for the `response` using the GMRES iterative algorithm.
     """
-
-    orbital_hessian = build_complete_matrix(intermediates)
-    orbital_hessian_action = MockOrbitalHessianAction(orbital_hessian)
 
     # combine spin dipole integrals into a single vector the length of hinv
     mua_x = intermediates.mua_x
@@ -37,7 +31,7 @@ def calculate(intermediates: Intermediates):
     }
 
     response = {
-        xyz: 2 * gmres_solve(orbital_hessian_action, dipole_moment[xyz])
+        xyz: 2 * gmres_solve(hessian_action, dipole_moment[xyz])
         for xyz in ["x", "y", "z"]
     }
 
