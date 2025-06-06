@@ -16,7 +16,7 @@ from DePrinceLab.response.polarizabilities.solve_gmres import\
 
 
 def main():
-    _, wfn = scf()
+    _, _, wfn = scf()
     intermediates = extract_intermediates(wfn)
 
     print("Polarizabilities:")

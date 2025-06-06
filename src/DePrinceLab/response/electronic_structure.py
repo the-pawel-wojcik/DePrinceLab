@@ -1,10 +1,10 @@
 import psi4
-from psi4.core import Wavefunction
+from psi4.core import Molecule, Wavefunction
 
 
-def scf() -> tuple[float, Wavefunction]:
+def scf() -> tuple[Molecule, float, Wavefunction]:
 
-    _ = psi4.geometry("""
+    mol: Molecule = psi4.geometry("""
     0 1
     O1	0.00000   0.00000   0.11572
     H2	0.00000   0.74879  -0.46288
@@ -20,6 +20,6 @@ def scf() -> tuple[float, Wavefunction]:
     psi4.core.be_quiet()
 
     # compute the Hartree-Fock energy and wavefunction
-    energy, wfn = psi4.energy('SCF', return_wfn=True)
+    energy, wfn = psi4.energy('SCF', molecule=mol, return_wfn=True)
 
-    return energy, wfn
+    return mol, energy, wfn
